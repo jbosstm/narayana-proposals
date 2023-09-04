@@ -1,0 +1,67 @@
+= <INSERT TITLE HERE>
+:author:            Your Name
+:email:             your.email@redhat.com
+:toc:               left
+:icons:             font
+:idprefix:
+:idseparator:       -
+
+== Overview
+
+== Issue Metadata
+
+=== Issue
+
+* https://issues.redhat.com/browse/JBTM[JBTM-XXXX]
+
+=== Related Issues
+
+* https://issues.redhat.com/browse/[YYYY-XXXX]
+
+=== Dev Contacts
+
+* mailto:{email}[{author}]
+
+=== Affected Projects or Components
+
+=== Other Interested Projects
+
+== Requirements
+
+=== Hard Requirements
+
+=== Nice-to-Have Requirements
+
+=== Non-Requirements
+
+== Backwards Compatibility
+
+// Does this enhancement affect backwards compatibility with previously
+// released versions of Narayana?
+// Can the identified incompatibility be avoided?
+
+== Security Considerations
+
+////
+Identification if any security implications that may need to be considered 
+with this feature or a confirmation that there are no security implications
+to consider.
+////
+
+== Test Plan
+
+== Community Documentation
+////
+Generally a feature should have documentation as part of the PR to Narayana master,
+or as a follow up PR. In some cases though the new feature does not need any
+documentation. Indicate which of these will happen.
+////
+== Release Note Content
+////
+Draft verbiage for up to a few sentences on the feature for inclusion in the
+Release Note blog article for the release that first includes this feature. 
+This content will be edited, so there is no need to make it perfect or discuss
+what release it appears in.  "See Overview" is acceptable if the overview is
+suitable. For simple features best covered as an item in a bullet-point list 
+of features containing a few words on each, use "Bullet point: <The few words>" 
+////
