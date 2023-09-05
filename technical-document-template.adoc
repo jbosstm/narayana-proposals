@@ -1,0 +1,59 @@
+= <INSERT TITLE HERE>
+:author:            Your Name
+:email:             your.email@example.com
+:toc:               left
+:icons:             font
+:idprefix:
+:idseparator:       -
+
+== Overview
+
+== Issue Metadata
+
+=== Issue
+
+* https://issues.redhat.com/browse/JBTM[JBTM-XXXX]
+
+=== Related Issues
+
+* https://issues.redhat.com/browse/[YYYY-XXXX]
+
+=== Dev Contacts
+
+* mailto:{email}[{author}]
+
+=== Affected Projects or Components
+
+=== Other Interested Projects
+
+== Requirements
+
+=== Hard Requirements
+
+=== Nice-to-Have Requirements
+
+=== Non-Requirements
+
+== Backwards Compatibility
+
+// Does this enhancement affect backwards compatibility with previously released versions of Narayana?
+// Can the identified incompatibility be avoided?
+
+== Security Considerations
+
+// Identification of any security implications that may need to be considered with this feature or
+// a confirmation that there are no security implications to consider.
+
+== Test Plan
+
+== Community Documentation
+// Generally, a feature should have documentation as part of the PR to Narayana master, or as a follow up PR.
+// In some cases, the new feature does not need any documentation. Indicate which of these will happen.
+
+== Release Note Content
+////
+Draft text of the feature (up to few sentences) for inclusion in the Release Note. For simple features,
+it is possible to use a short bullet-point list following the pattern "Bullet point: <description>".
+The Release Note described in this section should be copied into the JIRA related to this RFE once this
+document gets approved and merged. If the related JIRA is not updated, the Release Note in this document
+will not be part of the relase notes of Narayana.
