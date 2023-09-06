@@ -31,7 +31,7 @@ To facilitate the navigation between the pull request and the related JIRA, a hy
 
 ## 2. Implementation Document (optional)
 
-An optional implementation-specific document (definition in the appendix) can be submitted at this stage. This document should contain a clear roadmap to ensure a smooth transition from design to implementation. Although this step is optional, it might become necessary when there are disagreements among reviewers. Any time there is a disagreement on the implementation of the technical document, a pull request for an implementation-specific document must be raised and a discussion should be initiated. Once the reviewers agree on a specific implementation, the pull request should be merged and the RFE must be developed based on that document.
+An optional implementation-specific document (definition in the appendix) can be submitted at this stage. Although this step is optional, it might become necessary when there are disagreements among reviewers. Any time there is a disagreement on the implementation of the technical document, a pull request for an implementation-specific document must be raised and a discussion should be initiated. Once the reviewers agree on a specific implementation, the pull request should be merged and the RFE must be developed based on that document.
 
 Once the implementation-specific document has been approved and merged, it cannot be modified. If any improvement or modification is needed, the new implementation-specific document will have to be reviewed and approved by all reviewers. It is important to highlight that evaluation of modifications that extend an already approved and merged proposal should focus on new additions, unless they have a significant impact on the already approved and merged proposal.
 
@@ -57,4 +57,4 @@ The term 'technical document' is used to describe the document that is created b
 
 ### Implementation Document
 
-The term 'implementation document' is used to describe the document that is created based on the [implementation-document-template](implementation-document-template.adoc)' file in this repository.
+The term 'implementation document' is used to describe the document that is created based on the [implementation-document-template](implementation-document-template.adoc)' file in this repository. This document should contain a clear roadmap to ensure a smooth transition from design to implementation.
