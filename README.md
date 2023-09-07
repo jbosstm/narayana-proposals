@@ -17,7 +17,7 @@ When reviewers are analysing a proposal, there might be different outcome, which
 * The majority of participating reviewers rejects the proposal -> The proposal is rejected. The participating reviewers and the author will consider whether any part part of the proposal can be improved and/or incorporated into a new proposal
 Community contributors are encouraged to present proposals and to share their opinions on any Request For Enhancement (RFE). However, any approval throughout the workflow must be granted by the Narayana team and its optional members.
 
-[^1]: The time window can be adjusted according to individual and team circumstances. However, the Narayana team is required to provide a different time window within 3 days from the date a new proposal is created.
+[^1]: The time window can be adjusted according to individual and team circumstances.
 
 ## 1. Proposal and technical document
 
@@ -39,7 +39,7 @@ To facilitate the navigation between the pull request and the related JIRA, a hy
 
 ## 3. Pull Request
 
-Once the technical document and the optional implementation-specific document are approved and merged, community members are free to propose a pull request that modifies the code base of Narayana in accordance with the technical and the implementation-specific documents. Pull requests should be merged only when they are fully compliant with the aforementioned documents and are passing all tests of the Narayana CI. The usual review process is still needed before merging the pull request but reviews should not address the overall design or implementation of the RFE.
+Once the technical document and the optional implementation-specific document are approved and merged, community members are free to propose a pull request that modifies the code base of Narayana in accordance with the technical and the implementation-specific documents. Pull requests should be merged only when they are fully compliant with the aforementioned documents and are passing all tests of the Narayana CI. The usual review process is still needed before merging the pull request but reviews should not address the overall design or the implementation details that are approved in the proposals documents.
 
 ## 4. Appendix
 
@@ -58,3 +58,4 @@ The term 'technical document' is used to describe the document that is created b
 ### Implementation Document
 
 The term 'implementation document' is used to describe the document that is created based on the [implementation-document-template](implementation-document-template.adoc)' file in this repository. This document should contain a clear roadmap to ensure a smooth transition from design to implementation.
+
