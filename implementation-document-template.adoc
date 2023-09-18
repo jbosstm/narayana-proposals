@@ -1,0 +1,29 @@
+= <INSERT TITLE HERE>
+:author:            Your Name
+:email:             your.email@example.com
+:toc:               left
+:icons:             font
+:idprefix:
+:idseparator:       -
+
+== Requirements
+
+////
+The author is required to provide a comprehensive plan outlining their intended strategy for
+the implementation of each explicitly stated requirement as reported in the technical document.
+This plan must maintain a level of specificity adequate to clarify the author's design rationales
+for each requirement. Nevertheless, it is important to emphasize that the plan should serve as
+a high-level design overview, providing valuable insights into the author's conceptual choices
+for satisfying each requirement, rather than overly detailed step-by-step instructions.
+Once the pull request to fulfil the Request for Enhancement (RFE) is raised, a code review will
+be conducted to address the technical details of the developed solution.
+////
+
+=== Hard Requirements
+
+// * Feature: detailed design
+
+=== Nice-to-Have Requirements
+
+// * Feature: detailed design
+
