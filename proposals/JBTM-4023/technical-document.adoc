@@ -1,0 +1,65 @@
+= Add support for JEP 444: Virtual Threads and JEP 238: Multi-Release JAR Files
+:author:            Michael Musgrove
+:email:             mmusgrov@ibm.com
+:toc:               left
+:icons:             font
+:idprefix:
+:idseparator:       -
+
+== Overview
+
+JEP 444: Virtual Threads are available for the first time in OpenJDK release 21 but we'd like to start making use of the feature early while still supporting OpenJDK release 17 users. JEP 238: Multi-Release JAR Files was created for just this purpose. JEP 238 extends the JAR file format to allow multiple, Java-release-specific versions of class files to coexist in a single archive.
+
+The initial use case for JEP 444 will be to re-implement asynchronous Prepare, Commit and Rollback using the Executors.newVirtualThreadPerTaskExecutor instead of Executors.newFixedThreadPool.
+
+The properties that control asynchronous operations are defined in the [CoordinatorEnvironmentBean](https://github.com/jbosstm/narayana/blob/7.3.3.Final/ArjunaCore/arjuna/classes/com/arjuna/ats/arjuna/common/CoordinatorEnvironmentBean.java).
+
+== Issue Metadata
+
+=== Issue
+
+* https://issues.redhat.com/browse/JBTM-4023 (subtask of JBTM-2475)
+
+=== Related Issues
+
+* Parent task is JBTM-2475  
+
+=== Dev Contacts
+
+* mailto:{mmusgrov@redhat.com}[{Michael Musgrove}]
+
+=== Affected Projects or Components
+
+The "Narayana: ArjunaCore arjuna" module of the JBoss Transaction Manager project.
+
+=== Other Interested Projects
+
+== Requirements
+
+1. Change the maven pom to produce a Multi Release jar.
+2. When running on jdk 21 use virtual threads to run the asynchronous prepare, commit and rollback operations.
+
+=== Hard Requirements
+
+=== Nice-to-Have Requirements
+
+=== Non-Requirements
+
+== Backwards Compatibility
+
+Due to the use of the Multi-Release JAR format there are no compatibility issues.
+
+== Security Considerations
+
+None.
+
+== Test Plan
+
+Add a test that configures the transaction manger to perform asynchronous prepare calls (arjPropertyManager.getCoordinatorEnvironmentBean().setAsyncPrepare(true). When running on a version of the VM that supports virtual threads (JEP 444) check that all but one of the resources are asked to prepare on a virtual thread.
+
+== Community Documentation
+The feature is internal so does not require documentation.
+
+== Release Note Content
+
+When running on jdk version 21 and above asynchronous prepare and commit/rollback calls will use virtual threads.
