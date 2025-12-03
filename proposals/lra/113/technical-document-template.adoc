@@ -1,0 +1,58 @@
+= Create new LRA programmatic client API
+:author:            Marco Sappe' Griot
+:email:             msappegr@redhat.com
+:toc:               left
+:icons:             font
+:idprefix:
+:idseparator:       -
+
+== Overview
+Create new LRA programmatic client API to address issue 
+== Issue Metadata
+
+=== Issue
+
+* https://github.com/jbosstm/lra/issues/113
+
+=== Related Issues
+
+* https://github.com/jbosstm/lra/issues/175
+* https://github.com/jbosstm/lra/issues/157
+
+=== Dev Contacts
+
+* mailto:{msappegr@redhat.com}[{Marco Sappe' Griot}]
+
+=== Affected Projects or Components
+* https://github.com/jbosstm/lra/
+
+=== Other Interested Projects
+* Quarkus and WildFly
+
+== Requirements
+
+=== Hard Requirements
+
+=== Nice-to-Have Requirements
+
+=== Non-Requirements
+
+== Backwards Compatibility
+
+* Having a new client might affect application using the internal NarayanaLRAClient, tough the actual client is internal so just announcing the changes and releasing it as a minor should be enough. 
+
+== Security Considerations
+
+- Unit tests and Integration tests are required to check the new client API is safe. Consider users and microservices can use the new API.
+
+== Test Plan
+- Add unit test and integration tests (with the use of the Coordinator). 
+- Integration tests might be implemented with failsafe plugin and included under lra-test module. The WildFly Coordinator can be used for this purpose.
+
+== Community Documentation
+
+- Integrate implementation details here:  https://github.com/jbosstm/narayana/blob/main/docs/src/main/asciidoc/project/lra/jaxrs.adoc
+- Consider the lra documentation will soon be part of the lra project.
+
+== Release Note Content
+- Removal of internal NarayanaLRAClient. Please use the new Microprofile REST Client instead.

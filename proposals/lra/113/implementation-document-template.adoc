@@ -1,0 +1,26 @@
+= Create new LRA programmatic client API
+:author:            Marco Sappe' Griot
+:email:             msappegr@redhat.com
+:toc:               left
+:icons:             font
+:idprefix:
+:idseparator:       -
+
+== Requirements
+
+Create a new full REST client for the LRA Coordinator. The new client must contains methods corresponding to all of the LRA coordinator endpoints. The current client is NarayanaLRAClient which was Deprecated and later moved to an internal package. The new client shuld replace NarayanaLRAClient, implementing its functionalities. 
+NarayanaLRAClient uses the stork library to handle multiple Coordinators (a cluster of Coordinator). The new implementation must have that functionality too.
+Unit tests and integration tests are required.
+The new client must implement the Microprofile REST client spec:  https://microprofile.io/specifications/microprofile-rest-client/ .  
+
+=== Hard Requirements
+
+- New Programmatic LRA client using the Microprofile REST client implementation
+- All LRA Coordinator endpoints should be accessible with the new programmatic API
+- The new client must be able to deal with multiple coordinators using the stork library
+- Unit test to be included
+- Integration test to be included
+
+=== Nice-to-Have Requirements
+
+- Address https://github.com/jbosstm/lra/issues/157 too (Decide whether we should make the internal LRA client API not auto closable). My personal opinion is that we would benefit from having the client auto-closable.
