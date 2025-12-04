@@ -11,7 +11,7 @@
 Create a new full REST client for the LRA Coordinator. The new client must contain methods corresponding to all of the LRA coordinator endpoints. The current client is NarayanaLRAClient which was deprecated and later moved to an internal package. The new client should replace NarayanaLRAClient by implementing its functionality. 
 NarayanaLRAClient uses the stork library to handle multiple Coordinators (a cluster of Coordinator). The new implementation must have that functionality too.
 Unit tests and integration tests are required.
-The new client must implement the Microprofile REST client spec:  https://microprofile.io/specifications/microprofile-rest-client/ .  
+The new client must implement the MicroProfile REST Client specification:  https://microprofile.io/specifications/microprofile-rest-client/ .  
 
 === Hard Requirements
 
