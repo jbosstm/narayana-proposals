@@ -15,7 +15,7 @@ The new client must implement the MicroProfile REST Client specification:  https
 
 === Hard Requirements
 
-- New Programmatic LRA client using the Microprofile REST client implementation
+- New Programmatic LRA client using the MicroProfile REST Client implementation
 - All LRA Coordinator endpoints should be accessible with the new programmatic API
 - The new client must be able to deal with multiple coordinators using the stork library
 - Unit test to be included
