@@ -7,7 +7,7 @@
 :idseparator:       -
 
 == Overview
-Create new LRA programmatic client API to address issue 
+Create new LRA programmatic client API to replace the deprecated NarayanaLRAClient. The current LRA client implementation was deprecated and moved to an internal package, leaving users without a proper public API for programmatically interacting with LRA coordinators. This proposal introduces a new client implementation based on the MicroProfile REST Client specification that provides all the functionality of the deprecated client while following modern standards and best practices. The new client will support multiple coordinator instances using the Stork library for load balancing and will serve as the recommended way for applications to interact with LRA coordinators programmatically. 
 == Issue Metadata
 
 === Issue
@@ -21,7 +21,7 @@ Create new LRA programmatic client API to address issue
 
 === Dev Contacts
 
-* mailto:{msappegr@redhat.com}[{Marco Sappe' Griot}]
+* mailto:msappegr@redhat.com[Marco Sappe' Griot]
 
 === Affected Projects or Components
 * https://github.com/jbosstm/lra/
@@ -33,13 +33,30 @@ Create new LRA programmatic client API to address issue
 
 === Hard Requirements
 
+* Implement a new LRA client API using MicroProfile REST Client specification
+* Provide access to all LRA Coordinator endpoints (start, join, leave, close, cancel, status)
+* Support multiple coordinator instances using Stork library for load balancing
+* Replace all functionality currently provided by the deprecated NarayanaLRAClient
+* Maintain backward compatibility for applications during migration period
+* Include comprehensive unit tests for all client functionality
+* Include integration tests with actual LRA coordinator instances
+
 === Nice-to-Have Requirements
+
+* Make the client auto-closeable to improve resource management (addresses issue #157)
+* Provide migration utilities or documentation to ease transition from NarayanaLRAClient
+* Support for configuration via MicroProfile Config
+* Async/reactive client variants for better performance in non-blocking environments
 
 === Non-Requirements
 
+* This proposal does not aim to change the LRA Coordinator implementation
+* No changes to the LRA specification or protocol are required
+* No modifications to existing JAX-RS annotations or CDI integration
+
 == Backwards Compatibility
 
-* Having a new client might affect application using the internal NarayanaLRAClient, tough the actual client is internal so just announcing the changes and releasing it as a minor should be enough. 
+* Having a new client might affect applications using the internal NarayanaLRAClient, though the actual client is internal so just announcing the changes and releasing it as a minor release should be enough. 
 
 == Security Considerations
 
