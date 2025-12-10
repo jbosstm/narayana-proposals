@@ -43,6 +43,8 @@ The "Narayana: ArjunaCore arjuna" module of the JBoss Transaction Manager projec
 
 === Nice-to-Have Requirements
 
+JEP 444 promises significant performance improvements in throughput/thread utilisation so a benchmark to show the effect using virtual threads would be nice to have. The benchmark should demonstrate the effects on throughput and thread utilisation.
+
 === Non-Requirements
 
 == Backwards Compatibility
