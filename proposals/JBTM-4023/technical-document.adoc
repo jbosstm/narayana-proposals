@@ -37,19 +37,18 @@ The "Narayana: ArjunaCore arjuna" module of the JBoss Transaction Manager projec
 == Requirements
 
 1. Change the maven pom to produce a Multi Release jar.
-2. When running on jdk 21 use virtual threads to run the asynchronous prepare, commit and rollback operations.
+2. When running on JRE 21 use virtual threads to prepare participants when asynchronous prepare is configured (CoordinatEnvironmentBean#asyncPrepare) and use a virtual thread to commit and rollback transactions when asynchronous commit and abort are configured (CoordinatEnvironmentBean#asyncCommit). Include a configuration property to switch back to using the old thread pool - the one that reuses a fixed number of threads operating off a shared unbounded queue (see java.util.Executors#newFixedThreadPool). The property name will be CoordinatorEnvironmentBean#useVirtualThreadsForTwoPhaseCommitThreads.
 
 === Hard Requirements
 
 === Nice-to-Have Requirements
-
-JEP 444 promises significant performance improvements in throughput/thread utilisation so a benchmark to show the effect using virtual threads would be nice to have. The benchmark should demonstrate the effects on throughput and thread utilisation.
 
 === Non-Requirements
 
 == Backwards Compatibility
 
 Due to the use of the Multi-Release JAR format there are no compatibility issues.
+Note, however, that when running on JRE 21 a config option is provided for reverting to the use of the old fixed size thread pool.
 
 == Security Considerations
 
@@ -58,6 +57,8 @@ None.
 == Test Plan
 
 Add a test that configures the transaction manger to perform asynchronous prepare calls (arjPropertyManager.getCoordinatorEnvironmentBean().setAsyncPrepare(true). When running on a version of the VM that supports virtual threads (JEP 444) check that all but one of the resources are asked to prepare on a virtual thread.
+
+JEP 444 promises performance improvements in scalability, throughput and thread utilisation so a benchmark to show the effect of using virtual threads will be provided.
 
 == Community Documentation
 The feature is internal so does not require documentation.
