@@ -11,21 +11,24 @@
 Create a new full REST client for the LRA Coordinator. The new client must contain methods corresponding to all of the LRA coordinator endpoints. The current client is NarayanaLRAClient which was deprecated and later moved to an internal package. The new client should replace NarayanaLRAClient by implementing its functionality. 
 NarayanaLRAClient uses the stork library to handle multiple Coordinators (a cluster of Coordinator). The new implementation must have that functionality too.
 Unit tests and integration tests are required.
-The new client must implement the MicroProfile REST Client specification:  https://microprofile.io/specifications/microprofile-rest-client/ .  
+The new client will use the Reasteasy implementation of the Microprofile REST client: https://microprofile.io/specifications/microprofile-rest-client/ .  
 
 === Hard Requirements
 
-- New Programmatic LRA client using the MicroProfile REST Client implementation
+- The new programmatic LRA client will use the Resteasy implementation of the Microprofile REST client 
 - All LRA Coordinator endpoints should be accessible with the new programmatic API
 - The new client must be able to deal with multiple coordinators using the stork library
-- Unit test to be included
-- Integration test to be included
+- Unit tests must be included
+- Integration test must be included
+- The new client must be implements Closable Java interface as discussed at https://github.com/jbosstm/lra/issues/157 as the stork service needs to be shutdown.
 
 === Nice-to-Have Requirements
 
-- Address https://github.com/jbosstm/lra/issues/157 too (Decide whether we should make the internal LRA client API not auto closable). My personal opinion is that we would benefit from having the client auto-closable.
-
+- WildFly LRA coordinator integration tests.
+- Quarkus LRA coordinator integration tests. 
 == Implementation Details
+
+- The client will not be a CDI instance for convenience as it might be usefult to instantiate the client in not CDI context. 
 
 === Client Interface Design
 
@@ -39,15 +42,6 @@ The new client will expose the following main operations:
 - `getLRAStatus()` - Get the current status of an LRA
 - `getAllLRAs()` - List all active LRAs
 
-=== MicroProfile REST Client Integration
-
-The implementation will use MicroProfile REST Client annotations:
-
-- `@RegisterRestClient` for client registration
-- `@Path` for endpoint mapping
-- `@POST`, `@PUT`, `@GET`, `@DELETE` for HTTP methods
-- `@HeaderParam`, `@QueryParam` for parameter binding
-- `@Produces`/`@Consumes` for content negotiation
 
 === Stork Integration for Load Balancing
 

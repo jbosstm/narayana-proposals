@@ -33,20 +33,21 @@ Create new LRA programmatic client API to replace the deprecated NarayanaLRAClie
 
 === Hard Requirements
 
-* Implement a new LRA client API using MicroProfile REST Client specification
+* Implement a new LRA client API using the reasteasy implementation of the MicroProfile REST Client 
 * Provide access to all LRA Coordinator endpoints (start, join, leave, close, cancel, status)
 * Support multiple coordinator instances using Stork library for load balancing
 * Replace all functionality currently provided by the deprecated NarayanaLRAClient
 * Maintain backward compatibility for applications during migration period
 * Include comprehensive unit tests for all client functionality
 * Include integration tests with actual LRA coordinator instances
+* The client must be `closable` or `auto-closeable` as agreed in the issue #157
 
 === Nice-to-Have Requirements
 
-* Make the client auto-closeable to improve resource management (addresses issue #157)
 * Provide migration utilities or documentation to ease transition from NarayanaLRAClient
 * Support for configuration via MicroProfile Config
 * Async/reactive client variants for better performance in non-blocking environments
+* Provide unit and integration tests.
 
 === Non-Requirements
 
@@ -59,17 +60,15 @@ Create new LRA programmatic client API to replace the deprecated NarayanaLRAClie
 * Having a new client might affect applications using the internal NarayanaLRAClient, though the actual client is internal so just announcing the changes and releasing it as a minor release should be enough. 
 
 == Security Considerations
-
-- Unit tests and Integration tests are required to check the new client API is safe. Consider users and microservices can use the new API.
+* This proposal relies on underlying framework to guarantee the integrity of requests/responses (HTTPS, JWT or TLS) so this proposal will not cover that area.
 
 == Test Plan
 - Add unit test and integration tests (with the use of the Coordinator). 
-- Integration tests might be implemented with failsafe plugin and included under lra-test module. The WildFly Coordinator can be used for this purpose.
+- Integration tests will be implemented with failsafe plugin and included under lra-test module. The WildFly Coordinator will be used for this purpose.
 
 == Community Documentation
 
-- Integrate implementation details here:  https://github.com/jbosstm/narayana/blob/main/docs/src/main/asciidoc/project/lra/jaxrs.adoc
-- Consider the lra documentation will soon be part of the lra project.
+- Implementation details will be added here:  https://github.com/jbosstm/narayana/blob/main/docs/src/main/asciidoc/project/lra/jaxrs.adoc
 
 == Release Note Content
-- Removal of internal NarayanaLRAClient. Please use the new Microprofile REST Client instead.
+- Removal of internal NarayanaLRAClient. Please use the new programmatic client instead.
