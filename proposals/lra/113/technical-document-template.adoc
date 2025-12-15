@@ -33,7 +33,7 @@ Create new LRA programmatic client API to replace the deprecated NarayanaLRAClie
 
 === Hard Requirements
 
-* Implement a new LRA client API using the reasteasy implementation of the MicroProfile REST Client 
+* Implement a new LRA client API using the RESTEasy implementation of the MicroProfile REST Client 
 * Provide access to all LRA Coordinator endpoints (start, join, leave, close, cancel, status)
 * Support multiple coordinator instances using Stork library for load balancing
 * Replace all functionality currently provided by the deprecated NarayanaLRAClient
@@ -60,7 +60,7 @@ Create new LRA programmatic client API to replace the deprecated NarayanaLRAClie
 * Having a new client might affect applications using the internal NarayanaLRAClient, though the actual client is internal so just announcing the changes and releasing it as a minor release should be enough. 
 
 == Security Considerations
-* This proposal relies on underlying framework to guarantee the integrity of requests/responses (HTTPS, JWT or TLS) so this proposal will not cover that area.
+* Implement the client in a way it can be configured to use SSL or KeyStore using the RestClientBuilder methods https://download.eclipse.org/microprofile/microprofile-rest-client-1.3/apidocs/org/eclipse/microprofile/rest/client/RestClientBuilder.html 
 
 == Test Plan
 - Add unit test and integration tests (with the use of the Coordinator). 

@@ -11,11 +11,11 @@
 Create a new full REST client for the LRA Coordinator. The new client must contain methods corresponding to all of the LRA coordinator endpoints. The current client is NarayanaLRAClient which was deprecated and later moved to an internal package. The new client should replace NarayanaLRAClient by implementing its functionality. 
 NarayanaLRAClient uses the stork library to handle multiple Coordinators (a cluster of Coordinator). The new implementation must have that functionality too.
 Unit tests and integration tests are required.
-The new client will use the Reasteasy implementation of the Microprofile REST client: https://microprofile.io/specifications/microprofile-rest-client/ .  
+The new client will use the RESTEasy implementation of the Microprofile REST client: https://microprofile.io/specifications/microprofile-rest-client/ .  
 
 === Hard Requirements
 
-- The new programmatic LRA client will use the Resteasy implementation of the Microprofile REST client 
+- The new programmatic LRA client will use the RESTEasy implementation of the Microprofile REST client 
 - All LRA Coordinator endpoints should be accessible with the new programmatic API
 - The new client must be able to deal with multiple coordinators using the stork library
 - Unit tests must be included
@@ -26,6 +26,7 @@ The new client will use the Reasteasy implementation of the Microprofile REST cl
 
 - WildFly LRA coordinator integration tests.
 - Quarkus LRA coordinator integration tests. 
+- Implement a ClientRequestFilter to add the JWT token
 == Implementation Details
 
 - The client will not be a CDI instance for convenience as it might be usefult to instantiate the client in not CDI context. 
