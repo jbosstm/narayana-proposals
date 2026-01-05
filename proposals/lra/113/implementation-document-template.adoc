@@ -1,0 +1,57 @@
+= Create new LRA programmatic client API
+:author:            Marco Sappe' Griot
+:email:             msappegr@redhat.com
+:toc:               left
+:icons:             font
+:idprefix:
+:idseparator:       -
+
+== Requirements
+
+Create a new full REST client for the LRA Coordinator. The new client must contain methods corresponding to all of the LRA coordinator endpoints. The current client is NarayanaLRAClient which was deprecated and later moved to an internal package. The new client should replace NarayanaLRAClient by implementing its functionality. 
+NarayanaLRAClient uses the stork library to handle multiple Coordinators (a cluster of Coordinator). The new implementation must have that functionality too.
+Unit tests and integration tests are required.
+The new client will use the RESTEasy implementation of the Microprofile REST client: https://microprofile.io/specifications/microprofile-rest-client/ .  
+
+=== Hard Requirements
+
+- The new programmatic LRA client will use the RESTEasy implementation of the Microprofile REST client 
+- All LRA Coordinator endpoints should be accessible with the new programmatic API
+- The new client must be able to deal with multiple coordinators using the stork library
+- Unit tests must be included
+- Integration test must be included
+- The new client must be implements Closable Java interface as discussed at https://github.com/jbosstm/lra/issues/157 as the stork service needs to be shutdown.
+
+=== Nice-to-Have Requirements
+
+- WildFly LRA coordinator integration tests.
+- Quarkus LRA coordinator integration tests. 
+- Implement a ClientRequestFilter to add the JWT token
+== Implementation Details
+
+- The client will not be a CDI instance for convenience as it might be usefult to instantiate the client in not CDI context. 
+
+=== Client Interface Design
+
+The new client will expose the following main operations:
+
+- `startLRA()` - Start a new LRA transaction
+- `joinLRA()` - Join an existing LRA
+- `leaveLRA()` - Leave an LRA without compensating
+- `closeLRA()` - Close/complete an LRA
+- `cancelLRA()` - Cancel an LRA (trigger compensation)
+- `getLRAStatus()` - Get the current status of an LRA
+- `getAllLRAs()` - List all active LRAs
+
+
+=== Stork Integration for Load Balancing
+
+- Stork integration is already included in the NarayanaLRAClient and will be available in the new client too.
+
+=== Migration Path
+
+NarayanaLRAClient is internal and the new client will be public.
+However I will provide a migration guidance from NarayanaLRAClient:
+- API mapping documentation
+- Code examples showing before/after usage
+- I will update the codebase to replace the usage of NarayanaLRAClient with the new client.
