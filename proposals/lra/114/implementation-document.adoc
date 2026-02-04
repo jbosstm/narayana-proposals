@@ -1,0 +1,690 @@
+= High Availability LRA Coordinator Implementation Details
+:author:            Marco Sappe' Griot
+:email:             msappegr@redhat.com
+:toc:               left
+:icons:             font
+:idprefix:
+:idseparator:       -
+
+== Overview
+
+This document provides a comprehensive implementation plan for the HA LRA Coordinator proposal, detailing the design approach for each requirement specified in the technical document.
+
+=== Problem Statement
+
+Currently, LRA coordinators can scale horizontally (multiple instances can run), but each coordinator is isolated:
+
+* **Each coordinator has its own object store** - LRA state is not shared
+* **LRAs are bound to their creating coordinator** - Only the coordinator that created an LRA can manage it
+* **Recovery is siloed** - One recovery coordinator per object store
+* **Cloud environments suffer** - When a coordinator instance terminates (pod restart, scaling down), its LRAs become unavailable
+
+This creates availability and operational problems, particularly in dynamic cloud environments where instances are ephemeral.
+
+=== Solution Approach
+
+Enable **shared LRA management** by:
+
+1. **Distributed Storage (Infinispan)**: Replace isolated object stores with shared Infinispan caches accessible by all coordinators
+2. **Node ID in LRA IDs**: Embed coordinator node ID in LRA identifiers to support shared storage while tracking LRA origin
+3. **Remove Management Restrictions**: Allow any coordinator to handle any LRA operation, regardless of which coordinator created it
+4. **Unified Recovery**: Enable any recovery manager to recover LRAs from any coordinator
+5. **Network Partition Handling (Raft)**: Use Raft consensus for cluster membership and partition detection to ensure consistency
+
+With this approach, coordinator instances become **stateless** from the client perspective (state lives in Infinispan), enabling true high availability, automatic failover, and natural horizontal scaling.
+
+=== Current Limitations
+
+The current LRA coordinator implementation has the following constraints:
+
+* **Isolated Object Stores**: Each coordinator instance requires its own object store for LRA persistence
+* **Creator-Only Management**: LRAs can only be managed by the coordinator instance that created them
+* **Single Recovery per Store**: Only one recovery coordinator can operate per object store
+* **Dynamic Environment Challenges**: In cloud environments where coordinator instances come and go, LRAs become orphaned or unrecoverable when their creating coordinator terminates
+
+These limitations prevent true high availability and create operational challenges in dynamic, cloud-native deployments.
+
+**Note on Current Capabilities**: The current implementation does support multiple coordinators for nested LRAs - a child LRA can be managed by a different coordinator than its parent. However, each individual LRA is still bound to its creating coordinator, and coordinators cannot take over management of each other's LRAs.
+
+=== Hard Requirements
+
+==== Shared LRA Management Across Coordinators
+
+*Design Approach:*
+
+Remove the restriction that LRAs can only be managed by their creating coordinator:
+
+* **Current State**: LRA operations (join, leave, close, cancel) are restricted to the coordinator that created the LRA
+* **Target State**: Any coordinator instance can handle any operation for any LRA
+
+* **LRA ID Enhancement**:
+** Embed coordinator node ID in LRA identifiers to support routing, recovery, and shared storage
+** This is the key enabler: embedding node ID allows different coordinators to share a store
+** Format: `http://{base-url}/lra-coordinator/{node-id}/{lra-uuid}`
+** Example: `http://coordinator/lra-coordinator/node-a4f3/550e8400-e29b-41d4-a716-446655440000`
+** Benefits:
+*** Identifies which coordinator created the LRA (useful for diagnostics and metrics)
+*** Enables a single recovery manager to recover LRAs from multiple coordinators
+*** Does NOT restrict operations to the creating coordinator (any coordinator can process)
+*** Maintains MicroProfile LRA specification compliance (LRA ID is a URI)
+** Node ID Generation:
+*** Can be configured explicitly or auto-generated (hostname, UUID, etc.)
+*** Must be unique within the cluster
+*** Stable across coordinator restarts for recovery purposes
+
+* **Operation Routing**:
+** All LRA operations read from shared Infinispan storage
+** Any coordinator can process requests for any LRA
+** Remove coordinator instance affinity checks from operation handlers (e.g., checks that verify "this coordinator created this LRA")
+** Enable true load balancing across coordinator instances
+** Client requests can be routed to any coordinator - the node ID in the URL is informational, not restrictive
+
+* **Breaking Current Restrictions**:
+** Current code likely has checks like: `if (lra.getCreatingCoordinator() != this.nodeId) throw NotAllowedException`
+** These checks must be removed or disabled in HA mode
+** Instead: always allow operations, relying on Infinispan for shared state access
+** Optionally: emit metrics/logs noting when a coordinator handles an LRA it didn't create (useful for debugging)
+
+* **Code Structure**:
+** New package: `io.narayana.lra.coordinator.cluster`
+** Key classes:
+*** `ClusterAwareCoordinator.java` - Extends/wraps existing Coordinator with cluster-aware storage access
+*** `CoordinatorInstance.java` - Represents a cluster member with unique node ID
+*** `ClusterMembershipManager.java` - Manages cluster join/leave/discovery
+*** `LRAIdentifierUtil.java` - Utilities for parsing and generating node-aware LRA IDs
+
+* **Nested LRA Considerations**:
+** Current implementation already supports nested LRAs across different coordinators (parent on Coordinator A, child on Coordinator B)
+** This capability is preserved and enhanced in HA mode
+** With shared storage, any coordinator can manage both parent and child LRAs
+** Parent-child relationships stored in Infinispan (parent LRA ID field in child LRA metadata)
+** Compensation propagation from child to parent works across coordinator boundaries
+
+==== Distributed Storage Backend (Infinispan Integration)
+
+*Design Approach:*
+
+Replace the current isolated object stores (one per coordinator) with a shared Infinispan distributed cache accessible by all coordinator instances:
+
+* **Cache Topology**: Use Infinispan embedded mode with distributed cache configuration
+** **Primary Cache**: `lra-state-cache` - Stores LRA entities
+*** Key: LRA ID (URI)
+*** Value: `LRAData` object (serializable POJO containing all LRA metadata)
+*** Configuration: DIST_SYNC mode with numOwners=2 (configurable)
+** **Participant Cache**: `lra-participants-cache` - Stores participant information
+*** Key: Composite key (LRA ID + Participant URI)
+*** Value: `ParticipantData` object
+*** Configuration: DIST_SYNC mode, co-located with LRA state cache
+** **Recovery Cache**: `lra-recovery-cache` - Tracks pending recovery operations
+*** Key: LRA ID
+*** Value: Recovery metadata (timestamps, retry counts)
+
+* **Data Model**:
+[source,java]
+----
+public class LRAData implements Serializable {
+    private URI lraId;
+    private LRAStatus status;
+    private long startTime;
+    private long timeout;
+    private URI clientId;
+    private String parentId;
+    private Set<URI> participants;
+    private Map<String, String> properties;
+    // getters, setters, serialization methods
+}
+
+public class ParticipantData implements Serializable {
+    private URI participantUri;
+    private String compensateUri;
+    private String completeUri;
+    private String statusUri;
+    private String forgetUri;
+    private ParticipantStatus status;
+    private long joinedTime;
+    // getters, setters, serialization methods
+}
+----
+
+* **Transaction Integration**:
+** Use Infinispan transactions to ensure atomic updates across caches
+** Integrate with Narayana transaction manager for XA support
+** Optimistic locking for concurrent LRA state updates
+
+* **Cache Listeners**:
+** Implement cache listeners to trigger callbacks on state changes (e.g., LRA completion triggers participant notifications)
+** Use Infinispan's cluster listeners for cross-instance coordination
+
+* **Configuration**:
+** Infinispan configuration via `infinispan.xml` or programmatic API
+** Support for external Infinispan server mode (future enhancement)
+** JGroups transport configuration for cluster communication
+
+* **Benefit - Shared Storage**:
+** Eliminates the restriction of one object store per coordinator
+** Any coordinator can access any LRA's state
+** Enables true horizontal scaling and failover
+** Critical for dynamic cloud environments where coordinator instances are ephemeral
+
+==== Unified Recovery Management
+
+*Design Approach:*
+
+Enable any recovery manager to recover LRAs from any coordinator instance:
+
+* **Current Limitation**: Each object store requires its own dedicated recovery coordinator, meaning recovery is siloed per coordinator instance
+
+* **New Capability**: With shared Infinispan storage, a single recovery manager can handle LRAs across all coordinator instances
+
+* **Recovery Coordinator Implementation**:
+** Recovery coordinators read from shared Infinispan caches
+** Can process pending compensations/completions for LRAs from any creating coordinator
+** Node ID in LRA identifier helps track origin but doesn't restrict recovery
+** Recovery coordinator URLs remain opaque to participants (spec compliant)
+
+* **Recovery Process**:
+** Periodic scan of LRA state cache for LRAs in recovering states (Compensating, Completing, etc.)
+** Any coordinator's recovery manager can process any LRA in recovery
+** Distributed locking (Infinispan lock API) prevents duplicate recovery attempts
+** Recovery operations idempotent to handle retries safely
+
+* **GET Recovery Endpoint**:
+** `GET /lra-coordinator/?status={Completing|Compensating|etc}` query support
+** Query aggregates results from shared Infinispan cache
+** Returns LRAs in specified status across all coordinator instances
+** Maintains spec compliance for interoperability
+
+* **Code Changes**:
+** Modify `LRARecoveryModule.java` to use Infinispan instead of local object store
+** Implement distributed locking for recovery coordination
+** Add cluster-aware recovery scanning
+
+==== Consensus Algorithm Implementation (Raft)
+
+*Design Approach:*
+
+Implement Raft consensus to handle network partitions and ensure consistency in distributed environments:
+
+* **Primary Purpose**: Network partition handling and split-brain prevention
+** Infinispan provides distributed storage but can be affected by network partitions
+** Raft ensures only one partition (the majority) can make progress during network splits
+** Prevents inconsistent state when the cluster is partitioned
+
+* **Raft Library Selection**: Evaluate existing Raft implementations for Java:
+** **Option 1**: Apache Ratis (https://ratis.apache.org/) - Mature, Apache-licensed, used in production
+** **Option 2**: Atomix (https://atomix.io/) - Feature-rich, includes Raft implementation
+** **Option 3**: Custom lightweight implementation - Only if existing libraries don't fit
+** **Recommendation**: Apache Ratis due to maturity and active development
+
+* **Raft State Machine**:
+** The Raft replicated state machine manages cluster membership only:
+*** Active coordinator instances and their node IDs
+*** Instance health status and last heartbeat
+*** Cluster topology for partition detection
+** Simplified from initial design: no LRA ownership tracking (not needed with shared storage)
+** State machine operations:
+*** `REGISTER_INSTANCE` - Add new coordinator to cluster
+*** `UNREGISTER_INSTANCE` - Remove coordinator from cluster
+*** `HEARTBEAT` - Update instance liveness
+
+* **Leader Responsibilities**:
+** The Raft leader coordinator handles:
+*** New coordinator instance registration approval
+*** Removing failed instances from cluster membership
+*** Providing authoritative cluster topology during network partitions
+** Non-leader instances:
+*** Can process all LRA operations (no forwarding needed for LRA ops)
+*** Forward membership operations to leader
+*** Use Raft-replicated membership view for partition detection
+
+* **Leader Election**:
+** Raft's built-in leader election ensures a single leader at any time
+** Election timeout: 1-5 seconds (configurable)
+** Heartbeat interval: 500ms (configurable)
+
+* **Log Replication**:
+** Critical metadata changes replicated via Raft log
+** Ensures all instances have consistent view of cluster state
+** Committed entries applied to local state machine
+
+* **Integration with Coordinator**:
+[source,java]
+----
+public class RaftCoordinatorCluster {
+    private RaftClient raftClient;
+    private RaftServer raftServer;
+    private CoordinatorStateMachine stateMachine;
+
+    public void registerInstance(CoordinatorInstance instance) {
+        // Submit REGISTER_INSTANCE operation to Raft
+        raftClient.submit(new RegisterInstanceOp(instance));
+    }
+
+    public Set<CoordinatorInstance> getActiveInstances() {
+        // Query Raft state machine for active coordinator instances
+        return stateMachine.getActiveInstances();
+    }
+
+    public boolean isInMajorityPartition() {
+        // Check if this instance is in the majority partition
+        return raftServer.isLeader() || raftServer.hasRecentHeartbeatFromLeader();
+    }
+
+    public boolean isLeader() {
+        return raftServer.isLeader();
+    }
+}
+----
+
+* **Network Partition Handling**:
+** Raft guarantees only one partition can make progress (the majority partition)
+** Minority partitions will not accept new LRAs or state changes
+** When partition heals, Raft log replication brings minority up to date
+** Split-brain prevention through Raft's safety guarantees
+
+==== State Synchronization
+
+*Design Approach:*
+
+* **Infinispan-Based Synchronization**:
+** Primary mechanism: Infinispan distributed caches provide shared state across all coordinators
+** All coordinator instances read and write to the same distributed caches
+** State changes immediately visible to all instances (DIST_SYNC mode for strong consistency)
+** No explicit "synchronization" needed - shared storage provides consistent view
+
+* **Raft-Based Cluster Metadata**:
+** Cluster membership tracked via Raft for network partition safety
+** Raft ensures consistent view of which coordinators are active, even during network splits
+** Simpler than previous design: Raft only manages cluster topology, not LRA ownership
+
+* **Consistency Guarantees**:
+** Infinispan transactions ensure atomic LRA state transitions
+** Read-your-writes consistency: a coordinator can immediately read state it just wrote
+** Configurable consistency levels based on deployment requirements
+
+* **New Instance Bootstrapping**:
+** When a new instance joins:
+1. Connect to Infinispan cluster (receives replicated cache data)
+2. Join Raft group (syncs cluster membership)
+3. Register instance in cluster member list
+4. Mark as ready to accept requests
+** Bootstrapping is fast - no need to "transfer ownership" or migrate data
+
+==== Failover Support
+
+*Design Approach:*
+
+Handle coordinator instance failures gracefully, which is common in dynamic cloud environments where instances are ephemeral:
+
+* **Failure Detection**:
+** Infinispan's JGroups failure detection (configurable FD protocols)
+** Raft heartbeat timeout detection (1-5 seconds)
+** Health check endpoints (HTTP probes for Kubernetes liveness/readiness)
+
+* **Automatic Failover**:
+** Unlike current implementation (where LRAs become unavailable if their creating coordinator fails), surviving coordinators automatically handle LRAs from failed instances
+** No explicit "reassignment" needed - any coordinator can process any LRA request
+** Client requests automatically load balanced to healthy coordinators
+** In-flight operations protected by Infinispan transactions
+
+* **LRA Continuity Process**:
+** When a coordinator fails, its LRAs remain accessible in Infinispan
+** Subsequent requests for those LRAs handled by any surviving coordinator
+** Coordinator reads LRA state from shared cache and processes operation normally
+** No data loss or unavailability from coordinator failure
+** Particularly important for cloud environments where pods/containers are frequently replaced
+
+* **Timeout Handling**:
+** LRA timeouts stored in distributed cache with TTL
+** Any instance can detect and handle expired LRAs
+** Raft ensures only one instance processes each timeout (via ownership assignment)
+
+* **In-Flight Operation Recovery**:
+** Use Infinispan transactions to ensure atomic state updates
+** If an instance fails mid-operation, transaction rolls back
+** Takeover instance retries operation using idempotent APIs
+
+==== Load Distribution
+
+*Design Approach:*
+
+* **Request-Level Load Balancing**:
+** No LRA "ownership" - any coordinator can handle any request for any LRA
+** Clients use load balancing (Stork library, Kubernetes Service, etc.) to distribute requests across coordinator instances
+** Load naturally distributed as clients connect to different coordinators
+** Eliminates need for complex ownership assignment logic
+
+* **Client-Side Load Balancing**:
+** Clients use existing Stork library (as in proposal #113) to distribute requests
+** Round-robin, random, or least-connections selection of coordinator instances
+** No sticky sessions required - each request can go to a different coordinator
+** Coordinator instances are stateless from the client perspective (state in Infinispan)
+
+* **Recovery Load Balancing**:
+** Distribute recovery scans across instances to avoid duplicate work
+** Use Infinispan distributed executor or partition-based scanning
+** Each instance scans a subset of LRA ID space (e.g., based on hash ranges)
+** Prevents duplicate recovery attempts while ensuring all LRAs are covered
+
+* **Natural Scaling**:
+** Adding coordinator instances immediately increases capacity
+** No rebalancing or data migration needed (Infinispan handles cache distribution)
+** Removing instances (gracefully or via failure) does not impact LRA availability
+
+==== Cluster Discovery
+
+*Design Approach:*
+
+* **Discovery Mechanisms**:
+
+** **Static Configuration** (for VM/bare-metal deployments):
+*** Configure initial cluster members in `lra-coordinator.properties`
+*** Example:
+[source,properties]
+----
+lra.coordinator.cluster.members=coordinator1:7600,coordinator2:7600,coordinator3:7600
+lra.coordinator.cluster.bind-address=0.0.0.0
+lra.coordinator.cluster.bind-port=7600
+----
+
+** **JGroups Discovery** (WildFly embedded):
+*** Use JGroups discovery protocols (TCPPING, MPING, etc.)
+*** Infinispan inherits JGroups configuration from WildFly
+*** Example JGroups stack configuration in `infinispan.xml`
+
+** **Kubernetes Discovery** (cloud-native deployments):
+*** Use JGroups Kubernetes discovery protocol (DNS_PING or KUBE_PING)
+*** Discover pods via Kubernetes API or DNS service records
+*** Example configuration:
+[source,xml]
+----
+<stack name="kubernetes">
+    <tcp bind_port="7600"/>
+    <kubernetes.KUBE_PING namespace="${env.KUBERNETES_NAMESPACE}"
+                          labels="${env.KUBERNETES_LABELS}"/>
+    <pbcast.NAKACK2/>
+    <pbcast.GMS/>
+</stack>
+----
+
+** **DNS-Based Discovery** (for Docker Swarm, OpenShift services):
+*** Resolve coordinator service DNS name to multiple IPs
+*** Use resolved IPs as cluster members
+
+* **Dynamic Membership**:
+** Coordinator instances can join/leave at runtime
+** Raft handles membership changes via configuration change operations
+** Infinispan cluster view automatically updated
+
+* **Service Registration** (Nice-to-Have):
+** Register coordinator instances in external service registry (Consul, Eureka)
+** Clients discover cluster via service registry
+
+=== Nice-to-Have Requirements
+
+==== Read Replicas
+
+*Design Approach:*
+
+* Start coordinator instances in "read-only" mode
+* Read-only instances:
+** Do not participate in Raft voting (learner/observer role in Ratis)
+** Can serve status queries and read-only operations
+** Cannot start new LRAs or modify state
+* Benefits: Improved read scalability without consensus overhead
+
+==== Metrics and Monitoring
+
+*Design Approach:*
+
+* **MicroProfile Metrics Integration**:
+** Expose cluster metrics via `/metrics` endpoint
+** Metrics to include:
+*** `lra_coordinator_cluster_size` - Number of active instances
+*** `lra_coordinator_is_leader` - Boolean indicating leadership
+*** `lra_coordinator_lras_owned` - Number of LRAs owned by this instance
+*** `lra_raft_commit_latency` - Raft commit operation latency
+*** `lra_infinispan_cache_size` - Number of entries in LRA cache
+
+* **Health Checks**:
+** `/health/live` - Instance liveness (process running, responding)
+** `/health/ready` - Instance readiness (connected to cluster, caches initialized)
+
+* **Logging**:
+** Enhanced logging for cluster events
+** Correlation IDs for distributed tracing
+
+==== Graceful Shutdown
+
+*Design Approach:*
+
+* On shutdown signal (SIGTERM):
+1. Mark instance as "draining" (stop accepting new LRAs)
+2. Wait for in-flight LRAs to complete (with timeout)
+3. Transfer LRA ownership to other instances (via Raft reassignment)
+4. Leave Raft group gracefully
+5. Disconnect from Infinispan cluster
+6. Exit process
+
+* Kubernetes integration: Use `preStop` hook for graceful shutdown
+
+==== Rolling Upgrades
+
+*Design Approach:*
+
+* **Version Compatibility**:
+** Include version number in `CoordinatorInstance` metadata
+** Leader checks version compatibility before accepting new members
+** Support N and N-1 versions concurrently
+
+* **Upgrade Process**:
+1. Deploy new version instances alongside old version
+2. New instances join cluster
+3. Gradually drain and remove old version instances
+4. Once all instances upgraded, remove compatibility shims
+
+* **Data Migration**:
+** Use Infinispan's schema evolution support
+** Handle serialization compatibility with custom serializers
+
+=== Implementation Phases
+
+==== Phase 1: Infinispan Integration (Weeks 1-3)
+* Integrate Infinispan embedded caches
+* Implement LRAData and ParticipantData serialization
+* Migrate storage layer to Infinispan
+* Unit tests for cache operations
+* Integration tests with single-instance coordinator
+
+==== Phase 2: Raft Consensus (Weeks 4-7)
+* Integrate Apache Ratis library
+* Implement CoordinatorStateMachine for Raft
+* Leader election and basic replication
+* Cluster membership management via Raft
+* Unit tests for Raft operations
+
+==== Phase 3: Multi-Instance Coordination (Weeks 8-10)
+* Implement ClusterAwareCoordinator
+* LRA ownership assignment and consistent hashing
+* Request routing to appropriate instance
+* Integration tests with 3-node cluster
+
+==== Phase 4: Failover and Recovery (Weeks 11-13)
+* Failure detection and instance removal
+* LRA ownership reassignment on failure
+* Recovery takeover by surviving instances
+* Chaos engineering tests (instance failures, network partitions)
+
+==== Phase 5: Discovery and Deployment (Weeks 14-15)
+* Kubernetes discovery implementation
+* Static configuration support
+* WildFly deployment and configuration
+* Deployment documentation
+
+==== Phase 6: Testing and Optimization (Weeks 16-18)
+* Performance testing and optimization
+* Load distribution tuning
+* Stress testing with large clusters
+* Bug fixes and stabilization
+
+==== Phase 7: Documentation and Release (Weeks 19-20)
+* Architecture documentation
+* Deployment and configuration guides
+* Migration guides
+* Release preparation
+
+=== Key Implementation Challenges
+
+==== Challenge 1: Removing Creator-Only Restrictions
+*Issue*: Current code likely has checks preventing coordinators from managing LRAs they didn't create. Identifying and removing all such checks without breaking functionality.
+
+*Mitigation*:
+* Audit existing Coordinator.java code for affinity/ownership checks
+* Create feature flag to enable/disable shared management (for testing)
+* Comprehensive integration tests where Coordinator A creates LRA and Coordinator B manages it
+* Ensure all JAX-RS endpoints work regardless of which coordinator created the LRA
+
+==== Challenge 2: Object Store to Infinispan Migration
+*Issue*: Existing deployments have LRA state in isolated object stores. Need seamless migration path.
+
+*Mitigation*:
+* Develop robust migration tooling to export and consolidate object store data
+* Support gradual migration (dual-mode: read from Infinispan, fallback to object store)
+* Extensive testing with realistic object store data
+* Clear migration documentation and rollback procedures
+
+==== Challenge 3: Recovery Coordination Without Duplication
+*Issue*: With multiple recovery managers accessing shared storage, preventing duplicate recovery attempts.
+
+*Mitigation*:
+* Use Infinispan distributed locks for recovery operations
+* Implement recovery operation idempotency
+* Partition recovery scans across coordinator instances
+* Monitor for recovery conflicts in testing
+
+==== Challenge 4: Infinispan Transaction Integration
+*Issue*: Ensuring LRA state transitions are atomic when using Infinispan transactions with Narayana.
+
+*Mitigation*:
+* Use Infinispan's JTA integration with Narayana
+* Clear transaction boundaries around LRA operations
+* Test transaction rollback scenarios thoroughly
+* Handle Infinispan transaction failures gracefully
+
+==== Challenge 5: Network Partition Handling
+*Issue*: Network partitions can split the Infinispan cluster and Raft group, creating complex failure scenarios.
+
+*Mitigation*:
+* Raft ensures only majority partition accepts new LRAs
+* Infinispan partition handling configured to align with Raft decisions
+* Minority partition coordinators reject new operations (fail-safe)
+* Chaos engineering tests for partition scenarios
+
+==== Challenge 6: Backward Compatibility and Migration
+*Issue*: Existing deployments must continue working, and migration to HA should be optional.
+
+*Mitigation*:
+* HA features controlled by configuration (disabled by default)
+* Single-instance mode remains fully functional without Infinispan
+* LRA ID format backward compatible (node ID optional or embedded transparently)
+* Provide migration tooling and comprehensive documentation
+
+=== Testing Strategy
+
+* **Unit Tests**: JUnit tests for individual components
+** Raft state machine (cluster membership operations)
+** Infinispan cache operations (LRA CRUD, transactions)
+** LRA ID parsing and node ID extraction
+** Recovery manager distributed locking
+
+* **Integration Tests**: Arquillian tests with embedded WildFly and multi-instance coordinators
+** Coordinator A creates LRA, Coordinator B processes join/close/cancel operations
+** Verify any coordinator can manage any LRA
+** Recovery operations across coordinator instances
+** Nested LRA handling across multiple coordinators
+
+* **Chaos Tests**: Testcontainers-based tests simulating failures
+** Instance crashes during LRA operations
+** Network partitions (minority partition cannot create/modify LRAs)
+** Infinispan node failures
+** Recovery after partition healing
+
+* **Performance Tests**: JMH benchmarks comparing single-instance vs. clustered performance
+** LRA creation throughput
+** Operation latency with Infinispan vs. local storage
+** Recovery scan performance with distributed caches
+
+* **Compatibility Tests**: Test existing LRA applications against HA coordinator cluster
+** Annotation-based LRA clients
+** Programmatic LRA clients
+** Ensure no application code changes required
+
+=== Configuration Example
+
+Example `lra-coordinator.properties` for HA deployment:
+
+[source,properties]
+----
+# Enable HA mode (shared storage)
+lra.coordinator.ha.enabled=true
+
+# Coordinator node ID (embedded in LRA URLs)
+lra.coordinator.node.id=coordinator-node-1
+# Or auto-generate: lra.coordinator.node.id.auto=true
+
+# Cluster discovery (choose one)
+lra.coordinator.discovery.method=kubernetes
+lra.coordinator.discovery.kubernetes.namespace=default
+lra.coordinator.discovery.kubernetes.labels=app=lra-coordinator
+
+# Raft configuration (for network partition handling)
+lra.coordinator.raft.enabled=true
+lra.coordinator.raft.election-timeout-ms=3000
+lra.coordinator.raft.heartbeat-interval-ms=500
+
+# Infinispan configuration (shared storage backend)
+lra.coordinator.infinispan.config-file=infinispan-ha.xml
+lra.coordinator.infinispan.num-owners=2
+lra.coordinator.infinispan.cache-mode=DIST_SYNC
+
+# Recovery configuration
+lra.coordinator.recovery.scan-interval-seconds=30
+lra.coordinator.recovery.use-distributed-locking=true
+----
+
+=== Migration Path from Isolated Object Stores
+
+For users migrating from isolated object stores (current implementation) to shared Infinispan storage:
+
+1. **Export Existing LRA State**: Provide CLI tool to export LRA data from each coordinator's object store
+   - Tool scans each object store and extracts LRA metadata and participant information
+   - Handles multiple object stores (one per existing coordinator instance)
+
+2. **Configure Infinispan**: Set up Infinispan distributed caches
+   - Deploy Infinispan cluster (embedded or server mode)
+   - Configure cache topology and replication settings
+
+3. **Import and Consolidate State**: Import LRA state from all object stores into shared Infinispan
+   - Merge LRAs from multiple coordinators into unified storage
+   - Update LRA IDs to include node identifier if not already present
+   - Preserve recovery coordinator URLs and participant endpoints
+
+4. **Start HA Cluster**: Start multiple coordinator instances with HA mode enabled
+   - All instances connect to shared Infinispan
+   - Raft cluster forms for partition handling
+
+5. **Update Client Configuration**: Point clients to cluster endpoint
+   - Use load balancer (Kubernetes Service, HAProxy, etc.)
+   - Or configure Stork for client-side load balancing
+
+6. **Verify**: Confirm all LRAs are accessible from any coordinator instance
+   - Test LRA operations across different coordinator instances
+   - Verify recovery operations work cluster-wide
+
+=== Dependencies
+
+* **Apache Ratis** (or chosen Raft library): ~2.5.0
+* **Infinispan**: Version compatible with target WildFly version (e.g., 14.x for WildFly 27+)
+* **JGroups**: Bundled with Infinispan
+* **Narayana**: Existing dependency
+* **MicroProfile Config**: For configuration management
