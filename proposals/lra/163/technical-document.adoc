@@ -10,17 +10,17 @@
 
 Implement High Availability (HA) support for the LRA (Long Running Actions) Coordinator to enable fault-tolerant distributed transaction coordination across multiple coordinator instances. Currently, while multiple LRA coordinators can run in parallel for horizontal scaling, each coordinator manages only the LRAs it creates due to isolated, non-distributed storage. This restriction means that if a coordinator instance fails, its LRAs cannot be managed by other coordinators, creating availability and fault-tolerance issues.
 
-This proposal introduces distributed storage using Infinispan to enable any coordinator instance to manage any LRA, regardless of which coordinator originally created it. Combined with a Raft consensus algorithm for network partition handling and consistency guarantees, this enhancement will enable true high availability where coordinator failures do not result in lost or unmanageable LRAs. This is particularly critical for cloud-based environments where instances can be ephemeral and failover must be automatic and transparent.
+This proposal introduces distributed storage using Infinispan to enable any coordinator instance to manage any LRA, regardless of which coordinator originally created it. Combined with JGroups coordinator election for leader election and Infinispan's built-in partition handling for network partition tolerance, this enhancement will enable true high availability where coordinator failures do not result in lost or unmanageable LRAs. This is particularly critical for cloud-based environments.
 
 == Issue Metadata
 
 === Issue
 
-* https://github.com/jbosstm/lra/issues/[JBTM-XXXX] (to be created)
+https://github.com/jbosstm/lra/issues/163
 
 === Related Issues
 
-* Related to coordinator scalability and reliability improvements
+https://github.com/jbosstm/lra/issues/162
 
 === Dev Contacts
 
@@ -47,17 +47,16 @@ This proposal introduces distributed storage using Infinispan to enable any coor
 ** Remove the current restriction where only the creating coordinator can manage an LRA
 ** Critical for cloud environments where coordinator instances may be replaced or scaled dynamically
 
-* **Distributed Storage Backend**: Integrate Infinispan as the distributed storage mechanism for LRA state persistence, replacing the current isolated storage (file-based or in-memory)
+* **Distributed Storage Backend**: Integrate Infinispan as the distributed storage mechanism for LRA state persistence, replacing the current isolated storage
 ** Store LRA metadata (ID, status, participants, timeouts) accessible by all coordinator instances
 ** Store participant information and compensation/completion endpoints in shared caches
-** Ensure ACID properties for LRA state transitions across the cluster
 ** Enable atomic reads and writes from any coordinator instance
 
-* **Consensus Algorithm Implementation**: Implement Raft consensus algorithm to handle network partitions and ensure cluster-wide agreement on:
-** Leader election among coordinator instances
-** LRA state transitions and ownership
-** Cluster membership changes
-** Split-brain scenario prevention
+* **Leader Election and Partition Handling**: Use JGroups coordinator election and Infinispan partition handling to ensure cluster-wide agreement on:
+** Leader election among coordinator instances (JGroups view-based coordinator)
+** LRA state replication (Infinispan REPL_SYNC)
+** Cluster membership changes (automatic via JGroups)
+** Split-brain scenario prevention (Infinispan DENY_READ_WRITES strategy)
 
 * **State Synchronization**: Ensure all coordinator instances have a consistent view of:
 ** Active LRAs and their current status
@@ -69,29 +68,20 @@ This proposal introduces distributed storage using Infinispan to enable any coor
 ** Current limitation: each coordinator requires its own object store, with one recovery coordinator per store
 ** Goal: shared storage allows any recovery manager to handle LRAs from any coordinator instance
 ** Recovery operations (completing failed compensations/completions) can be performed by any coordinator
-** Maintain recovery coordinator URL endpoints while making the implementation transparent
 
 * **Failover Support**: Automatic failover when a coordinator instance fails:
 ** In-flight LRA operations must be recoverable by surviving instances
 ** No loss of LRA state or participant information
 ** Pending compensations/completions must be executed by takeover instances
-** Particularly important in dynamic cloud environments where coordinator instances are ephemeral
 
 * **LRA Identification**: Enhance LRA ID structure to support shared storage:
-** Embed coordinator node ID in LRA identifiers to enable proper routing and recovery
+** Embed coordinator node ID in LRA identifiers to enable proper routing, recovery and collision avoidance.
 ** Maintain compatibility with existing LRA ID format and participant expectations
 ** Enable coordinators to identify and route operations appropriately
 
 * **Load Distribution**: Distribute LRA coordination workload across available instances:
 ** New LRA requests can be handled by any coordinator instance
-** Any coordinator can process operations for any LRA (not just the creating coordinator)
 ** Participant callbacks distributed across the cluster
-** Recovery and timeout operations balanced across instances
-
-* **Cluster Discovery**: Automatic discovery and registration of coordinator instances:
-** Support for static configuration (predefined cluster members)
-** Support for dynamic discovery in containerized environments
-** Integration with Kubernetes/OpenShift service discovery mechanisms
 
 === Nice-to-Have Requirements
 
@@ -107,15 +97,6 @@ This proposal introduces distributed storage using Infinispan to enable any coor
 ** Transfers leadership to another instance
 ** Prevents new LRA assignments during shutdown
 
-* **Multi-Datacenter Support**: Extended Raft implementation supporting geographically distributed coordinator clusters with configurable consistency vs. latency trade-offs
-
-* **Rolling Upgrades**: Support for upgrading coordinator instances without cluster downtime:
-** Version compatibility checking
-** Gradual rollout with mixed versions
-** Automatic state migration
-
-* **Backup and Restore**: Cluster-wide backup and restore capabilities for disaster recovery
-
 === Non-Requirements
 
 * **Application-Level Changes**: Existing LRA applications should not require code changes to benefit from HA coordinators
@@ -124,17 +105,9 @@ This proposal introduces distributed storage using Infinispan to enable any coor
 
 * **Client-Side Clustering Logic**: LRA clients should use standard load balancing (e.g., Stork library) to distribute requests; client-side cluster awareness is not required
 
-* **Synchronous Replication Guarantees**: While consistency is required, this proposal does not mandate synchronous replication for every operation (eventual consistency with bounded staleness is acceptable for non-critical operations)
-
 == Backwards Compatibility
 
 * **Configuration**: New HA configuration should be optional; single-instance deployments must continue to work without Infinispan or clustering configuration
-
-* **Storage Migration**: Provide migration path from existing isolated object stores (per-coordinator) to shared Infinispan distributed storage:
-** Migration utilities to consolidate LRA state from multiple object stores into Infinispan
-** Handle LRA ID format migration (embedding node IDs if not already present)
-** Support for gradual migration without downtime
-** Preserve recovery coordinator URLs and participant endpoints
 
 * **API Compatibility**: All existing REST endpoints and JAX-RS annotations must remain compatible
 
@@ -151,22 +124,9 @@ This proposal introduces distributed storage using Infinispan to enable any coor
 ** Authentication and authorization for cache access
 ** Support for encrypted storage at rest
 
-* **Raft Protocol Security**: Ensure Raft consensus messages are authenticated and encrypted to prevent:
-** Man-in-the-middle attacks on leader election
-** Tampering with state replication
-** Unauthorized leader election attempts
-
-* **Network Isolation**: Support for network policies to restrict cluster communication to authorized networks in Kubernetes/OpenShift environments
-
-* **Audit Logging**: Enhanced logging for cluster events:
-** Leader election and failover events
-** Instance join/leave operations
-** Consensus failures and split-brain detection
-
 == Test Plan
 
 * **Unit Tests**:
-** Raft consensus algorithm implementation (leader election, log replication, safety properties)
 ** Infinispan integration (CRUD operations, cache listeners, transactions)
 ** State synchronization logic
 ** Failover and recovery mechanisms
@@ -185,22 +145,14 @@ This proposal introduces distributed storage using Infinispan to enable any coor
 ** Scalability testing with varying cluster sizes (3, 5, 7 nodes)
 ** Load distribution effectiveness
 
-* **Chaos Engineering Tests**:
+* **Chaos Tests**:
 ** Random coordinator instance termination
 ** Network latency injection
 ** Partial network partitions
-** Cascading failures
-** Resource exhaustion scenarios
-
-* **Compatibility Tests**:
-** Existing LRA applications against HA coordinator cluster
-** Mixed version clusters during rolling upgrades
-** Migration from single instance to clustered deployment
 
 == Community Documentation
 
 * **Architecture Documentation**: Detailed design document describing:
-** Raft consensus implementation specifics
 ** Infinispan cache topology and configuration
 ** State machine replication approach
 ** Failure detection and recovery mechanisms
@@ -211,31 +163,16 @@ This proposal introduces distributed storage using Infinispan to enable any coor
 ** Kubernetes/OpenShift deployment manifests
 ** Load balancer configuration
 
-* **Configuration Reference**: Complete reference for:
-** Cluster discovery settings
-** Raft algorithm tuning parameters
-** Infinispan cache configuration options
-** Failover and timeout settings
-
-* **Migration Guide**: Instructions for:
-** Migrating from single instance to HA deployment
-** Data migration procedures
-** Rollback procedures
-
-* **Troubleshooting Guide**: Common issues and solutions:
-** Split-brain scenarios and recovery
-** Performance tuning
-** Monitoring and diagnostics
-
 == Release Note Content
 
 High Availability support for LRA Coordinator enables fault-tolerant distributed transaction coordination through clustered coordinator instances. Key features include:
 
 * Multiple coordinator instances running concurrently with automatic failover
 * Distributed state storage using Infinispan for shared LRA metadata
-* Raft consensus algorithm implementation for network partition handling and leader election
-* Automatic cluster discovery and dynamic membership management
-* Zero downtime deployments with rolling upgrade support
+* JGroups coordinator election for recovery leader selection
+* Infinispan built-in partition handling (DENY_READ_WRITES strategy) for split-brain prevention
+* Distributed locking (Infinispan clustered locks) prevents concurrent modifications
+* Node ID embedding in LRA IDs enables shared object store usage
 * Full backward compatibility with existing single-instance deployments
 
 This enhancement enables production deployments requiring high availability and horizontal scalability for LRA-based distributed transactions in cloud-native environments.

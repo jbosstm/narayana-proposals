@@ -1,0 +1,408 @@
+= High Availability LRA Coordinator Implementation Details
+:author:            Marco Sappe' Griot
+:email:             msappegr@redhat.com
+:toc:               left
+:icons:             font
+:idprefix:
+:idseparator:       -
+
+== Overview
+
+This document provides a comprehensive implementation plan for the HA LRA Coordinator proposal, detailing the design approach for each requirement specified in the technical document.
+
+=== Problem Statement
+
+Currently, LRA coordinators can scale horizontally (multiple instances can run), but each coordinator is isolated:
+
+* **Each coordinator has its own object store** - LRA state is not shared
+* **LRAs are bound to their creating coordinator** - Only the coordinator that created an LRA can manage it
+* **Cloud environments suffer** - When a coordinator instance terminates (pod restart, scaling down), its LRAs become unavailable
+
+=== Solution Approach
+
+Enable **shared LRA management** by:
+
+1. **Distributed Storage (Infinispan)**: Replace isolated object stores with shared Infinispan caches accessible by all coordinators
+2. **Node ID in LRA IDs**: Embed coordinator node ID in LRA identifiers to support shared storage while tracking LRA origin
+3. **Remove Management Restrictions**: Allow any coordinator to handle any LRA operation, regardless of which coordinator created it
+5. **Network Partition Handling**: Use Infinispan's built-in partition handling (DENY_READ_WRITES strategy) for split-brain prevention
+6. **Cluster Coordination**: Use JGroups coordinator election for recovery leader selection
+
+**Key Architecture Decision**: We will leverage **existing proven technologies** rather than implementing custom consensus protocols:
+- **JGroups coordinator election** (built into Infinispan) for recovery leader selection
+- **Infinispan's partition handling** (DENY_READ_WRITES strategy) for split-brain prevention
+- **Infinispan clustered locks** for distributed locking and conflict prevention
+
+This approach provides **simplicity, maintainability, and robustness** for LRA coordination requirements by building on battle-tested clustering infrastructure.
+
+With this approach, coordinator instances will become **stateless** from the client perspective (state lives in Infinispan), enabling true high availability, automatic failover, and natural horizontal scaling.
+
+=== Current Limitations
+
+The current LRA coordinator implementation has the following constraints:
+
+* **Isolated Object Stores**: Each coordinator instance requires its own object store for LRA persistence
+* **Creator-Only Management**: LRAs can only be managed by the coordinator instance that created them
+* **Single Recovery per Store**: Only one recovery coordinator can operate per object store
+* **Dynamic Environment Challenges**: In cloud environments where coordinator instances come and go, LRAs become orphaned or unrecoverable when their creating coordinator terminates
+
+These limitations prevent true high availability and create operational challenges in dynamic, cloud-native deployments.
+
+=== Hard Requirements
+
+==== Shared LRA Management Across Coordinators
+
+*Design Approach:*
+
+Remove the restriction that LRAs can only be managed by their creating coordinator:
+
+* **Current State**: LRA operations (join, leave, close, cancel) are restricted to the coordinator that created the LRA
+* **Target State**: Any coordinator instance can handle any operation for any LRA
+
+* **LRA ID Enhancement**:
+** Embed coordinator node ID in LRA identifiers to support routing, recovery, and shared storage
+** This is the key enabler: embedding node ID allows different coordinators to share a store
+** Format: `http://{base-url}/lra-coordinator/{node-id}/{lra-uuid}`
+** Example: `http://coordinator/lra-coordinator/node-a4f3/550e8400-e29b-41d4-a716-446655440000`
+** Benefits:
+*** Identifies which coordinator created the LRA (useful for diagnostics and metrics)
+*** Enables a single recovery manager to recover LRAs from multiple coordinators
+*** Does NOT restrict operations to the creating coordinator (any coordinator can process)
+*** Maintains MicroProfile LRA specification compliance (LRA ID is a URI)
+** Node ID Generation:
+*** Can be configured explicitly or auto-generated (hostname, UUID, etc.)
+*** Must be unique within the cluster
+*** Stable across coordinator restarts for recovery purposes
+
+* **Operation Routing**:
+** All LRA operations read from shared Infinispan storage
+** Any coordinator can process requests for any LRA
+** Remove coordinator instance affinity checks from operation handlers (e.g., checks that verify "this coordinator created this LRA")
+** Enable true load balancing across coordinator instances
+** Client requests can be routed to any coordinator - the node ID in the URL is informational, not restrictive
+
+==== Distributed Storage Backend (Infinispan Integration)
+
+*Design Approach:*
+
+Replace the current isolated object stores (one per coordinator) with a shared Infinispan distributed cache accessible by all coordinator instances:
+
+* **Cache Topology**: Use Infinispan embedded mode with distributed cache configuration
+** **Primary Cache**: `lra-state-cache` - Stores LRA entities
+*** Key: LRA ID (URI)
+*** Value: `LRAData` object (serializable POJO containing all LRA metadata)
+** **Participant Cache**: `lra-participants-cache` - Stores participant information
+*** Key: Composite key (LRA ID + Participant URI)
+*** Value: `ParticipantData` object
+** **Recovery Cache**: `lra-recovery-cache` - Tracks pending recovery operations
+*** Key: LRA ID
+*** Value: Recovery metadata (timestamps, retry counts)
+
+* **Configuration**:
+** Infinispan configuration via `infinispan.xml` or programmatic API
+** JGroups transport configuration for cluster communication
+
+==== Unified Recovery Management
+
+*Design Approach:*
+
+Enable any recovery manager to recover LRAs from any coordinator instance:
+
+* **Current Limitation**: Each object store requires its own dedicated recovery coordinator, meaning recovery is siloed per coordinator instance
+
+* **New Capability**: With shared Infinispan storage, a single recovery manager can handle LRAs across all coordinator instances
+
+* **Recovery Coordinator Implementation**:
+** Recovery coordinators read from shared Infinispan caches
+** Can process pending compensations/completions for LRAs from any creating coordinator
+** Node ID in LRA identifier helps track origin but doesn't restrict recovery
+** Recovery coordinator URLs remain opaque to participants (spec compliant)
+
+* **GET Recovery Endpoint**:
+** `GET /lra-coordinator/?status={Completing|Compensating|etc}` query support
+** Query aggregates results from shared Infinispan cache
+** Returns LRAs in specified status across all coordinator instances
+** Maintains spec compliance for interoperability
+
+* **Code Changes**:
+** Modify `LRARecoveryModule.java` to use Infinispan instead of local object store
+** Implement distributed locking for recovery coordination
+** Add cluster-aware recovery scanning
+
+==== Cluster Coordination (JGroups)
+
+*Design Approach:*
+
+Use JGroups coordinator election (built into Infinispan) for recovery leader selection. This approach provides the necessary coordination for LRA HA without the complexity of implementing full consensus protocols.
+
+**Design Rationale**:
+- LRA operations use eventual consistency with compensation (SAGA pattern), not strict ACID requiring consensus
+- Infinispan provides built-in partition tolerance strategies
+- JGroups offers proven, battle-tested coordinator election
+- Simpler architecture means fewer failure modes and easier operations
+
+* **JGroups Coordinator Election**:
+** JGroups View-based coordinator selection: **first member in the view becomes coordinator**
+** Automatic and deterministic - all cluster members agree on who is coordinator
+** Built into Infinispan's JGroups transport (no additional dependencies)
+** Coordinator role is used **only for recovery operations** to prevent duplicate recovery attempts
+
+* **Recovery Leader Selection**:
+** **Only the JGroups coordinator performs recovery operations**
+** Prevents duplicate recovery attempts across the cluster
+** When coordinator fails, JGroups automatically elects a new coordinator
+** New coordinator immediately takes over recovery responsibilities
+** Implementation:
+[source,java]
+----
+public void periodicWorkSecondPass() {
+    // LRARecoveryModule - only run recovery if we're the cluster coordinator
+    if (haEnabled && !clusterCoordinator.isCoordinator()) {
+        return; // Skip recovery - we're not the leader
+    }
+
+    if (haEnabled && !infinispanStore.isAvailable()) {
+        return; // Skip recovery - cache unavailable (minority partition)
+    }
+
+    // Perform recovery operations...
+    recoverTransactions();
+}
+----
+
+* **No Leader Election Overhead for LRA Operations**:
+** Unlike Raft, JGroups coordination is **only used for recovery**
+** All LRA operations (start, join, close, cancel) can be handled by **any coordinator instance**
+** No forwarding to leader required
+** No consensus latency for normal operations
+** Natural load distribution across all instances
+
+* **Coordinator Change Listeners**:
+** Components can register for coordinator change notifications
+** Example: LRARecoveryModule listens to start/stop recovery when leadership changes
+
+* **Integration with Infinispan**:
+** ClusterCoordinator will get JChannel from Infinispan's JGroups transport
+** No separate JGroups configuration needed (reuses Infinispan's)
+** Automatic cluster membership management via Infinispan
+
+==== Network Partition Handling (Infinispan)
+
+*Design Approach:*
+
+Use **Infinispan's built-in partition handling** to prevent split-brain scenarios and ensure consistency during network partitions.
+
+* **Infinispan Partition Handling Strategy**:
+** Configuration: `DENY_READ_WRITES` partition handling mode
+** When a network partition occurs, Infinispan automatically:
+*** Detects the partition via JGroups failure detection
+*** Determines which partition has the majority of nodes
+*** **Majority partition**: Continues operating normally (AVAILABLE mode)
+*** **Minority partition**: Enters DEGRADED_MODE and denies all read/write operations
+** When partition heals: Infinispan automatically reconciles using PREFERRED_ALWAYS merge policy
+
+* **Configuration Example**:
+[source,xml]
+----
+<distributed-cache name="activeLRACache" mode="SYNC">
+    <partition-handling when-split="DENY_READ_WRITES"
+                       merge-policy="PREFERRED_ALWAYS"/>
+    <encoding media-type="application/x-protostream"/>
+</distributed-cache>
+----
+
+* **Coordinator Integration**:
+** LRAService and LRARecoveryModule will check cache availability before operations
+** If cache is in DEGRADED_MODE (minority partition), operations will be rejected
+** Implementation:
+[source,java]
+----
+public synchronized LongRunningAction startLRA(...) {
+    // Check if cache is available (not in minority partition)
+    if (haEnabled && infinispanStore != null && !infinispanStore.isAvailable()) {
+        throw new WebApplicationException(
+            "Coordinator unavailable - in minority partition",
+            Response.Status.SERVICE_UNAVAILABLE);
+    }
+    // Proceed with LRA creation...
+}
+
+public boolean isAvailable() {
+    AvailabilityMode mode = activeLRACache.getAdvancedCache().getAvailability();
+    return mode != AvailabilityMode.DEGRADED_MODE;
+}
+----
+
+* **Benefits**:
+** **Automatic detection**: No custom partition detection code needed
+** **Proven strategy**: Infinispan's partition handling is battle-tested in production
+** **Consistent behavior**: All distributed caches follow same partition handling rules
+** **Split-brain prevention**: Minority partitions cannot modify state, preventing inconsistencies
+** **Automatic recovery**: When partition heals, data automatically reconciled
+
+* **Partition Scenarios**:
+** **3-node cluster splits 2-1**: 2-node partition continues, 1-node partition rejects operations
+** **5-node cluster splits 3-2**: 3-node partition continues, 2-node partition rejects operations
+** **2-node cluster splits 1-1**: Both partitions enter DEGRADED_MODE (no majority)
+*** Recommendation: Use odd number of nodes (3, 5, 7) for proper quorum
+
+==== State Synchronization
+
+*Design Approach:*
+
+* **Infinispan-Based Synchronization**:
+** Primary mechanism: Infinispan distributed caches will provide shared state across all coordinators
+** All coordinator instances will read and write to the same distributed caches
+
+* **JGroups-Based Cluster Membership**:
+** Cluster membership tracked via JGroups views (built into Infinispan)
+** JGroups ensures consistent view of which coordinators are active
+** Automatic membership updates when instances join/leave
+** Failure detection via JGroups FD (Failure Detection) protocols
+
+* **Consistency Guarantees**:
+** Infinispan transactions will ensure atomic LRA state transitions
+** Read-your-writes consistency: a coordinator can immediately read state it just wrote
+** Distributed locks (Infinispan clustered locks) will prevent concurrent modifications
+
+* **New Instance Bootstrapping**:
+** When a new instance joins:
+1. Connect to Infinispan cluster (receives replicated cache data)
+2. Automatically join JGroups cluster (via Infinispan transport)
+3. Register instance and node ID in coordinator registry
+4. Mark as ready to accept requests
+** Bootstrapping will be fast - no need to "transfer ownership" or migrate data
+** All LRAs immediately accessible via shared Infinispan caches
+
+==== Failover Support
+
+*Design Approach:*
+
+Handle coordinator instance failures gracefully:
+
+* **Failure Detection**:
+** Infinispan's JGroups failure detection (configurable FD protocols: FD_ALL, FD_SOCK, etc.)
+** Typical detection time: 2-10 seconds (configurable)
+** Health check endpoints (HTTP probes for Kubernetes liveness/readiness)
+
+* **Automatic Failover**:
+** Unlike current implementation (where LRAs become unavailable if their creating coordinator fails), surviving coordinators will automatically handle LRAs from failed instances
+** No explicit "reassignment" needed - any coordinator can process any LRA request
+** Client requests automatically load balanced to healthy coordinators
+** In-flight operations protected by Infinispan transactions (https://docs.jboss.org/author/display/ISPN/Infinispan%20transactions.html)
+
+* **LRA Continuity Process**:
+** When a coordinator fails, its LRAs remain accessible in Infinispan
+** Subsequent requests for those LRAs will be handled by any surviving coordinator
+** Coordinator reads LRA state from shared cache and processes operation normally
+** No data loss or unavailability from coordinator failure
+** Particularly important for cloud environments where pods/containers are frequently replaced
+
+* **Timeout Handling** (focal point):
+** At the moment the timeout scheduling is in-memory for each coordinator instance, which means that  if that coordinator instance fails before the timeout expires, the timer is lost
+** LRA timeouts will be stored in distributed cache and the recovery coordinator should handle that too in the periodic recovery
+** Recovery coordinator scans for expired LRAs and initiates compensation/completion
+** Distributed locks prevent duplicate timeout processing
+** Any coordinator can become recovery leader and handle timeouts
+
+* **In-Flight Operation Recovery**:
+** Infinispan transactions will ensure atomic state updates
+** If an instance fails mid-operation, transaction rolls back automatically
+** Client can retry operation with any surviving coordinator
+
+==== Cluster Discovery
+
+*Design Approach:*
+
+* **Discovery Mechanisms**:
+
+** **Static Configuration** (for VM/bare-metal deployments):
+*** Configure initial cluster members in `lra-coordinator.properties`
+*** Example:
+[source,properties]
+----
+lra.coordinator.cluster.members=coordinator1:7600,coordinator2:7600,coordinator3:7600
+lra.coordinator.cluster.bind-address=0.0.0.0
+lra.coordinator.cluster.bind-port=7600
+----
+
+** **JGroups Discovery** (WildFly embedded):
+*** Use JGroups discovery protocols (TCPPING, MPING, etc.)
+*** Infinispan inherits JGroups configuration from WildFly
+
+** **Kubernetes Discovery** (cloud-native deployments):
+*** Use JGroups Kubernetes discovery protocol (DNS_PING or KUBE_PING)
+*** Discover pods via Kubernetes API or DNS service records
+
+** **DNS-Based Discovery** (for Docker Swarm, OpenShift services):
+*** Resolve coordinator service DNS name to multiple IPs
+*** Use resolved IPs as cluster members
+
+* **Dynamic Membership**:
+** Coordinator instances can join/leave at runtime
+** Infinispan cluster view automatically updated
+
+
+=== Nice-to-Have Requirements
+
+==== Graceful Shutdown
+
+*Design Approach:*
+
+* On shutdown signal (SIGTERM):
+1. Mark instance as "draining" (stop accepting new LRAs)
+2. If this instance is recovery coordinator, wait for current recovery cycle to complete
+3. Wait for in-flight LRA operations to complete (with configurable timeout)
+4. Close JGroups channel (automatically triggers coordinator re-election if needed)
+5. Disconnect from Infinispan cluster gracefully
+6. Exit process
+
+* Kubernetes integration:
+** Use `preStop` hook in pod spec for graceful shutdown
+** Example:
+[source,yaml]
+----
+lifecycle:
+  preStop:
+    exec:
+      command: ["/bin/sh", "-c", "sleep 10"]  # Allow time for draining
+----
+** Set appropriate `terminationGracePeriodSeconds` (e.g., 30-60 seconds)
+
+* No explicit ownership transfer needed:
+** LRAs remain in Infinispan after instance shutdown
+** Any surviving coordinator can handle subsequent requests
+** If shutting down coordinator was recovery leader, JGroups automatically elects new coordinator
+
+=== Testing Strategy
+
+* **Unit Tests**: JUnit tests for individual components
+** ClusterCoordinator (JGroups view changes, coordinator election)
+** InfinispanStore (LRA CRUD operations, cache availability checking)
+
+* **Integration Tests**: Arquillian or embedded tests with multi-instance coordinators
+** Coordinator A creates LRA, Coordinator B processes join/close/cancel operations
+** Verify any coordinator can manage any LRA
+** Recovery leader election and failover
+** Recovery operations with distributed locks
+** Nested LRA handling across multiple coordinators
+** Cache availability checking during operations
+
+* **Chaos Tests**: Testcontainers or similar framework for failure scenarios
+** Instance crashes during LRA operations
+** Network partitions (verify minority partition rejects operations)
+** Coordinator failover (verify new coordinator takes over recovery)
+** Infinispan node failures and recovery
+** Partition healing and state reconciliation
+** Concurrent failures (multiple coordinators failing)
+
+* **Performance Tests**: JMH benchmarks or load tests
+** LRA creation throughput (single vs. multi-instance)
+** Impact of cluster size on performance (3, 5, 7 nodes)
+** Cache operation latency under load
+
+* **Partition Handling Tests**: Specific tests for network partition scenarios
+** 3-node cluster split 2-1 (verify 2-node continues, 1-node rejects)
+** 5-node cluster split 3-2 (verify 3-node continues, 2-node rejects)
+** 2-node cluster split 1-1 (verify both enter DEGRADED_MODE)
+** Verify no split-brain (both partitions never active simultaneously)
