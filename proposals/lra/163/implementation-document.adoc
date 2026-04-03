@@ -99,7 +99,7 @@ Arjuna deactivate()
 ** **Embedded mode**: Standalone/Quarkus use self-created `DefaultCacheManager` with programmatic configuration
 ** Infinispan configuration via `InfinispanConfiguration` CDI producer
 * **Classpath detection**: `HAObjectStoreConfiguration` uses `Class.forName()` to detect if `InfinispanSlots` is available. If not (PR #2537 not yet merged), logs a warning and falls back to the default filesystem ObjectStore.
-* **Serialization**: ProtoStream binary serialization via compile-time annotation processing (`LRASchemaInitializer`). `InfinispanLRAState` stores both high-level fields and raw serialized bytes from `LongRunningAction.save_state()` for Arjuna deserialization.
+* **Serialization**: Standard Arjuna `OutputObjectState` byte serialization via `LongRunningAction.save_state()`. No custom serialization — `InfinispanSlots` stores raw bytes in the replicated cache.
 
 
 ==== Unified Recovery Management
