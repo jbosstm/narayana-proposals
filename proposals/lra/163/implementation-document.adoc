@@ -75,6 +75,10 @@ Any coordinator instance can handle any operation for any LRA:
 ** Any coordinator can process requests for any LRA
 ** Client requests can be routed to any coordinator via standard load balancing
 
+* **Cross-Node Participant Matching**:
+** Path-based participant lookup (`findParticipantByRecoveryPath`) matches only the URI path, ignoring host:port
+** Enables cross-node operations where the same participant may be registered with different coordinator addresses
+
 ==== Distributed Storage Backend (Infinispan via BackingSlots)
 
 *Implementation:*
@@ -112,6 +116,7 @@ The standard `recoverTransactionsFromObjectStore()` code path works unchanged:
 * Since the ObjectStore backend is Infinispan, all coordinators see the same data
 * Only the JGroups cluster coordinator (recovery leader) runs recovery
 * `LRARecoveryModule` checks `lra.coordinator.ha.enabled` and looks up `ClusterCoordinationService` via CDI
+* Deferred CDI initialization via `ensureHAInitialized()` with double-checked locking, because the recovery module constructor runs before CDI bean discovery completes
 * Recovery leader guard in `periodicWorkSecondPass()` prevents duplicate recovery across nodes
 
 ==== Cluster Coordination (JGroups)
@@ -134,6 +139,7 @@ JGroups coordinator election (built into Infinispan) is used for recovery leader
 [source,java]
 ----
 public void periodicWorkSecondPass() {
+    ensureHAInitialized(); // Deferred CDI lookup (constructor runs before bean discovery)
     // Only the cluster coordinator performs recovery
     if (haEnabled && !isRecoveryLeader) {
         return;
@@ -176,14 +182,8 @@ Infinispan's built-in partition handling prevents split-brain scenarios:
 
 ==== Graceful Shutdown
 
-* On shutdown signal (SIGTERM):
-1. Mark instance as "draining" (stop accepting new LRAs)
-2. If recovery coordinator, wait for current recovery cycle to complete
-3. Wait for in-flight LRA operations to complete (with configurable timeout)
-4. Close JGroups channel (triggers coordinator re-election if needed)
-5. Disconnect from Infinispan cluster
-6. Exit process
-
+* `@PreDestroy` cleanup on `InfinispanClusterCoordinator`: shuts down the fallback scheduler, removes the `@ViewChanged` listener from the cache manager
+* `@PreDestroy` cleanup on `InfinispanConfiguration`: stops the cache manager (only if not container-managed via JNDI)
 * No explicit ownership transfer needed — LRAs remain in Infinispan after shutdown
 
 === Configuration Reference
@@ -202,8 +202,11 @@ lra.coordinator.cluster.name=lra-cluster
 # Path to custom JGroups configuration XML
 lra.coordinator.jgroups.config=jgroups-tcp.xml
 
-# JGroups bind address
+# JGroups bind address (default: 127.0.0.1)
 lra.coordinator.jgroups.bind_addr=0.0.0.0
+
+# Infinispan persistent state location (default: tmpdir/lra-infinispan-{nodeName})
+lra.coordinator.infinispan.persistent.location=/var/lra/infinispan
 
 # Infinispan cache replication mode (default: REPL_SYNC)
 lra.coordinator.infinispan.cache.mode=REPL_SYNC
