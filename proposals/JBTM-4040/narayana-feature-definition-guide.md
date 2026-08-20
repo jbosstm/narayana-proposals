@@ -260,5 +260,5 @@ This keeps the stable code path completely decoupled from the experimental imple
 ## **6.5. Impact Assessment for WildFly and Quarkus Integration**
 
 Before merging a new Experimental or Tech Preview feature, the author MUST evaluate and document:
-- **WildFly:** Does the feature require changes to `module.xml` in the WildFly feature pack? If so, the feature MUST be in a separate Maven module so that the `module.xml` change is only needed when the feature is provisioned.
+- **WildFly:** Does the feature require new dependencies in the WildFly feature pack's `module.xml`? If the dependency can be marked optional (using `optional="true"` in `module.xml`) without breaking existing stable features, the same-module pattern with `<optional>true</optional>` in the POM is acceptable. If the dependency must be mandatory (i.e., required for existing stable features to function), the feature MUST be in a separate Maven module to avoid forcing the dependency on consumers who don't use the feature.
 - **Quarkus:** Does the feature require a new Quarkus extension or changes to an existing extension's deployment module? If so, document the integration path and ensure the Quarkus extension's `quarkus-extension.yaml` reflects the correct maturity status.
