@@ -72,6 +72,16 @@ Stable features are well-tested, and ready for general availability.
 
 The transition between stages requires approval from the team (discussion can happen on zulip,slack or github). For all transitions, ensure compliance with the target stage's implementation requirements before the change is submitted for review.
 
+## 3.1. Promotion Criteria
+
+**what makes a feature worth bumping to the next stability level?**
+
+I think one important factor should be actual usage and feedback from people testing the feature, whether they are team members or members of the wider community. Real-world use cases can give us valuable evidence about how well a feature works, whether it is meeting its intended goals, and what issues or limitations still need to be addressed. This could therefore provide a strong basis for deciding whether a feature is ready to move to the next stability level.
+
+This approach would also help us understand whether a feature is actually welcomed and useful to the community. If a feature has been available for some time but has little or no user base, it may be worth questioning whether it should progress to production stability. Promoting such a feature to Stable could result in the team taking on the long-term maintenance and compatibility burden for something that ultimately nobody uses.
+
+Therefore, in addition to the existing implementation requirements and team approval for stage transitions, I think evidence of real-world usage and community adoption should be considered as part of the criteria for promoting a feature to a higher stability level. This would give us a more evidence-based way of deciding which features are mature enough to become Stable and which ones may need further development, remain at their current stability level, or eventually be deprecated.
+
 # **4. Deprecation/Removal process**
 
 Requirements: 
